@@ -1,0 +1,175 @@
+#!/bin/bash
+
+#--------------------------
+# Temp Files & Cleaning up on Signals
+#--------------------------
+# for no input file --> create temp file
+tempfile=tmpFile_$$
+# for getting all column results together                 
+columnFile=colFile_$$               
+
+trap "rm -f $tempfile $columnFile; exit 1" INT HUP TERM
+
+#---------------------------
+# Rows: Average & Median
+#---------------------------
+calc_rows() 
+{
+# initialize variables
+sum=0;
+divider=0;
+counter=0;
+
+# print labels
+echo -e "Average\tMedian"
+
+# get one row at a time 
+while read myLine
+do
+    # get the sum
+    # divider = the number of elements in a row
+    # sum = running sum for that row
+    for i in $myLine; do
+        sum=$(expr $sum + $i)
+        divider=$(expr $divider + 1)
+    done
+
+    # rounding: a / b = (a + b/2) / b
+    halfDiv=$(expr $divider / 2)
+    roundSum=$(expr $sum + $halfDiv)
+    sum=$(expr $roundSum / $divider)
+    
+    # get the median
+    # sort the row and get the middle element
+    # if row is even, get the larger of the two
+    sortedLine=$(echo $myLine | tr " " "\n" | sort -g)
+    for j in $sortedLine; do
+        if [ $counter -le $halfDiv ]; then
+           median=$j
+        fi
+        counter=$(expr $counter + 1)
+    done
+
+    # print results to screen
+    echo -e "$sum\t$median"
+
+    # reset variables for next row
+    sum=0;
+    divider=0;
+    counter=0;
+    
+done < $input_file
+}
+
+#---------------------------
+# Columns: Average & Median
+#---------------------------
+calc_cols(){
+# initialize variables
+j=1;
+sum=0;
+divider=0;
+counter=0;
+
+# elements = the number of columns in the document
+elements=$( head -n1 $input_file | wc -w )
+while [ $j -le $elements ]
+do
+    # get each element from a column
+    # sum = add all elements; divider = number of elements in column
+    column=$( cut -f $j $input_file )
+    for i in $column; do
+        sum=$(expr $sum + $i)
+        divider=$(expr $divider + 1)
+    done
+
+    # rounding: a / b = (a + b/2) / b
+    halfDiv=$(expr $divider / 2)
+    roundSum=$(expr $sum + $halfDiv)
+    sum=$(expr $roundSum / $divider)
+    
+    # sort column to find median
+    sortedLine=$( echo $column | tr " " "\n" | sort -g)
+    for k in $sortedLine; do
+        if [ $counter -le $halfDiv ]; then
+             median=$k
+        fi
+        counter=$(expr $counter + 1)
+    done 
+
+    # print results to a temp file
+    echo -e "$sum\t$median" >> $columnFile
+    
+    # reset variables for next column
+    sum=0;
+    average=0;
+    divider=0;
+    counter=0;
+    j=$(expr $j + 1)
+done
+
+# print results to screen
+averages=$( cut -f 1 $columnFile)
+echo "Averages: "
+echo $averages | tr ' ' '\t' 
+
+medians=$( cut -f 2 $columnFile)
+echo "Medians: "
+echo $medians | tr ' ' '\t'  
+}
+
+
+
+#----------------------
+# Using stdin (no file)
+# ----------------------
+no_file() 
+{
+    cat > $tempfile
+    input_file=$tempfile
+}
+
+#---------------------------
+# Conditions for functions (Main?)
+#---------------------------
+usage_msg=$( echo "./stats {-rows|-cols} [file]" )
+error_msg=$( echo "./stats: cannot read $2" )
+
+# if there are too few arguments (< 1) or too many (> 2)
+# print instructions on how to use
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+   echo "$usage_msg" >&2
+   exit 1
+fi
+
+# if there are exactly two arguments
+# then, make sure file is readable  
+# otherwise, there is only one argument, so use stdin  
+if [[ $# == 2 ]]; then
+   if [[ ! -r "$2" ]]; then
+        echo "$error_msg" >&2
+        exit 1
+   else
+        input_file=$2
+   fi
+else
+   no_file
+fi        
+
+# if switch starts with -r, calculate by rows
+# if switch starts with -c, calculate by columns
+# otherwise, print instructions how to use
+if [[ $1 =~ ^-r ]]; then
+   calc_rows
+elif [[ $1 =~ ^-c ]]; then
+   calc_cols
+else
+   echo $usage_msg >&2
+   exit 1
+fi
+
+# cleaning up temp files
+rm -f $tempfile
+rm -f $columnFile
+
+exit 0
